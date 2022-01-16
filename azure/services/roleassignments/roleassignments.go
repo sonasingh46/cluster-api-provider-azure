@@ -20,9 +20,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Azure/azure-sdk-for-go/profiles/2019-03-01/authorization/mgmt/authorization"
+	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
+
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
+
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -32,28 +34,33 @@ import (
 )
 
 const azureBuiltInContributorID = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+const serviceName = "roleassignments"
 
 // RoleAssignmentScope defines the scope interface for a role assignment service.
 type RoleAssignmentScope interface {
 	azure.ClusterDescriber
-	RoleAssignmentSpecs() []azure.RoleAssignmentSpec
+	azure.AsyncStatusUpdater
+	RoleAssignmentSpecs() []azure.ResourceSpecGetter
 }
 
 // Service provides operations on Azure resources.
 type Service struct {
 	Scope RoleAssignmentScope
 	client
+	async.Reconciler
 	virtualMachinesClient        virtualmachines.Client
 	virtualMachineScaleSetClient scalesets.Client
 }
 
 // New creates a new service.
 func New(scope RoleAssignmentScope) *Service {
+	client := newClient(scope)
 	return &Service{
 		Scope:                        scope,
-		client:                       newClient(scope),
+		client:                       client,
 		virtualMachinesClient:        virtualmachines.NewClient(scope),
 		virtualMachineScaleSetClient: scalesets.NewClient(scope),
+		Reconciler:                   async.New(scope, client, client),
 	}
 }
 
@@ -61,25 +68,31 @@ func New(scope RoleAssignmentScope) *Service {
 func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "roleassignments.Service.Reconcile")
 	defer done()
+	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
+	defer cancel()
 
 	for _, roleSpec := range s.Scope.RoleAssignmentSpecs() {
-		switch roleSpec.ResourceType {
+		rs := roleSpec.(*RoleAssignmentSpec)
+		scope := fmt.Sprintf("/subscriptions/%s/", s.Scope.SubscriptionID())
+		rs.Scope = scope
+		contributorRoleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", s.Scope.SubscriptionID(), azureBuiltInContributorID)
+		rs.RoleDefinitionID = contributorRoleDefinitionID
+		switch rs.ResourceType {
 		case azure.VirtualMachine:
-			return s.reconcileVM(ctx, roleSpec)
+			return s.reconcileVM(ctx, rs)
 		case azure.VirtualMachineScaleSet:
-			return s.reconcileVMSS(ctx, roleSpec)
+			return s.reconcileVMSS(ctx, rs)
 		default:
-			return errors.Errorf("unexpected resource type %q. Expected one of [%s, %s]", roleSpec.ResourceType,
+			return errors.Errorf("unexpected resource type %q. Expected one of [%s, %s]", rs.ResourceType,
 				azure.VirtualMachine, azure.VirtualMachineScaleSet)
 		}
 	}
 	return nil
 }
 
-func (s *Service) reconcileVM(ctx context.Context, roleSpec azure.RoleAssignmentSpec) error {
+func (s *Service) reconcileVM(ctx context.Context, roleSpec *RoleAssignmentSpec) error {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "roleassignments.Service.reconcileVM")
 	defer done()
-
 	spec := &virtualmachines.VMSpec{
 		Name:          roleSpec.MachineName,
 		ResourceGroup: s.Scope.ResourceGroup(),
@@ -94,7 +107,8 @@ func (s *Service) reconcileVM(ctx context.Context, roleSpec azure.RoleAssignment
 		return errors.Errorf("%T is not a compute.VirtualMachine", resultVMIface)
 	}
 
-	err = s.assignRole(ctx, roleSpec.Name, resultVM.Identity.PrincipalID)
+	roleSpec.PrincipalID = resultVM.Identity.PrincipalID
+	err = s.assignRole(ctx, roleSpec)
 	if err != nil {
 		return errors.Wrap(err, "cannot assign role to VM system assigned identity")
 	}
@@ -104,7 +118,7 @@ func (s *Service) reconcileVM(ctx context.Context, roleSpec azure.RoleAssignment
 	return nil
 }
 
-func (s *Service) reconcileVMSS(ctx context.Context, roleSpec azure.RoleAssignmentSpec) error {
+func (s *Service) reconcileVMSS(ctx context.Context, roleSpec *RoleAssignmentSpec) error {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "roleassignments.Service.reconcileVMSS")
 	defer done()
 
@@ -112,8 +126,8 @@ func (s *Service) reconcileVMSS(ctx context.Context, roleSpec azure.RoleAssignme
 	if err != nil {
 		return errors.Wrap(err, "cannot get VMSS to assign role to system assigned identity")
 	}
-
-	err = s.assignRole(ctx, roleSpec.Name, resultVMSS.Identity.PrincipalID)
+	roleSpec.PrincipalID = resultVMSS.Identity.PrincipalID
+	err = s.assignRole(ctx, roleSpec)
 	if err != nil {
 		return errors.Wrap(err, "cannot assign role to VMSS system assigned identity")
 	}
@@ -123,20 +137,10 @@ func (s *Service) reconcileVMSS(ctx context.Context, roleSpec azure.RoleAssignme
 	return nil
 }
 
-func (s *Service) assignRole(ctx context.Context, roleAssignmentName string, principalID *string) error {
+func (s *Service) assignRole(ctx context.Context, roleSpec *RoleAssignmentSpec) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "roleassignments.Service.assignRole")
 	defer done()
-
-	scope := fmt.Sprintf("/subscriptions/%s/", s.Scope.SubscriptionID())
-	// Azure built-in roles https://docs.microsoft.com/en-us/azure/role-based-access-control/built-in-roles
-	contributorRoleDefinitionID := fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", s.Scope.SubscriptionID(), azureBuiltInContributorID)
-	params := authorization.RoleAssignmentCreateParameters{
-		Properties: &authorization.RoleAssignmentProperties{
-			RoleDefinitionID: to.StringPtr(contributorRoleDefinitionID),
-			PrincipalID:      principalID,
-		},
-	}
-	_, err := s.client.Create(ctx, scope, roleAssignmentName, params)
+	_, err := s.CreateResource(ctx, roleSpec, serviceName)
 	return err
 }
 
@@ -144,6 +148,5 @@ func (s *Service) assignRole(ctx context.Context, roleAssignmentName string, pri
 func (s *Service) Delete(ctx context.Context) error {
 	_, _, done := tele.StartSpanWithLogger(ctx, "roleassignments.Service.Delete")
 	defer done()
-
 	return nil
 }

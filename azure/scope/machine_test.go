@@ -21,6 +21,8 @@ import (
 	"reflect"
 	"testing"
 
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/roleassignments"
+
 	autorestazure "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/Azure/go-autorest/autorest/to"
@@ -345,7 +347,7 @@ func TestMachineScope_RoleAssignmentSpecs(t *testing.T) {
 	tests := []struct {
 		name         string
 		machineScope MachineScope
-		want         []azure.RoleAssignmentSpec
+		want         []azure.ResourceSpecGetter
 	}{
 		{
 			name: "returns empty if VM identity is system assigned",
@@ -357,7 +359,7 @@ func TestMachineScope_RoleAssignmentSpecs(t *testing.T) {
 					},
 				},
 			},
-			want: []azure.RoleAssignmentSpec{},
+			want: []azure.ResourceSpecGetter{},
 		},
 		{
 			name: "returns RoleAssignmentSpec if VM identity is not system assigned",
@@ -373,11 +375,11 @@ func TestMachineScope_RoleAssignmentSpecs(t *testing.T) {
 					},
 				},
 			},
-			want: []azure.RoleAssignmentSpec{
-				{
+			want: []azure.ResourceSpecGetter{
+				&roleassignments.RoleAssignmentSpec{
+					ResourceType: azure.VirtualMachine,
 					MachineName:  "machine-name",
 					Name:         "azure-role-assignment-name",
-					ResourceType: azure.VirtualMachine,
 				},
 			},
 		},

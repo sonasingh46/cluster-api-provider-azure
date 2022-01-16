@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/roleassignments"
+
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
@@ -271,17 +273,17 @@ func (m *MachineScope) DiskSpecs() []azure.ResourceSpecGetter {
 }
 
 // RoleAssignmentSpecs returns the role assignment specs.
-func (m *MachineScope) RoleAssignmentSpecs() []azure.RoleAssignmentSpec {
+func (m *MachineScope) RoleAssignmentSpecs() []azure.ResourceSpecGetter {
+	roles := make([]azure.ResourceSpecGetter, 1)
 	if m.AzureMachine.Spec.Identity == infrav1.VMIdentitySystemAssigned {
-		return []azure.RoleAssignmentSpec{
-			{
-				MachineName:  m.Name(),
-				Name:         m.AzureMachine.Spec.RoleAssignmentName,
-				ResourceType: azure.VirtualMachine,
-			},
+		roles[0] = &roleassignments.RoleAssignmentSpec{
+			Name:         m.AzureMachine.Spec.RoleAssignmentName,
+			MachineName:  m.Name(),
+			ResourceType: azure.VirtualMachine,
 		}
+		return roles
 	}
-	return []azure.RoleAssignmentSpec{}
+	return []azure.ResourceSpecGetter{}
 }
 
 // VMExtensionSpecs returns the vm extension specs.

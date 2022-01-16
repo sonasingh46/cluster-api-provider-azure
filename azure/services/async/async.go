@@ -90,7 +90,6 @@ func processOngoingOperation(ctx context.Context, scope FutureScope, client Futu
 func (s *Service) CreateResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) (result interface{}, err error) {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "async.Service.CreateResource")
 	defer done()
-
 	resourceName := spec.ResourceName()
 	rgName := spec.ResourceGroupName()
 
@@ -102,6 +101,7 @@ func (s *Service) CreateResource(ctx context.Context, spec azure.ResourceSpecGet
 
 	// Get the resource if it already exists, and use it to construct the desired resource parameters.
 	var existingResource interface{}
+
 	if existing, err := s.Creator.Get(ctx, spec); err != nil && !azure.ResourceNotFound(err) {
 		return nil, errors.Wrapf(err, "failed to get existing resource %s/%s (service: %s)", rgName, resourceName, serviceName)
 	} else if err == nil {

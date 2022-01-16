@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/roleassignments"
+
 	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 
 	"github.com/Azure/go-autorest/autorest/to"
@@ -571,17 +573,18 @@ func (m *MachinePoolScope) SaveVMImageToStatus(image *infrav1.Image) {
 }
 
 // RoleAssignmentSpecs returns the role assignment specs.
-func (m *MachinePoolScope) RoleAssignmentSpecs() []azure.RoleAssignmentSpec {
+func (m *MachinePoolScope) RoleAssignmentSpecs() []azure.ResourceSpecGetter {
+	roles := make([]azure.ResourceSpecGetter, 1)
 	if m.AzureMachinePool.Spec.Identity == infrav1.VMIdentitySystemAssigned {
-		return []azure.RoleAssignmentSpec{
-			{
-				MachineName:  m.Name(),
-				Name:         m.AzureMachinePool.Spec.RoleAssignmentName,
-				ResourceType: azure.VirtualMachineScaleSet,
-			},
+		roles[0] = &roleassignments.RoleAssignmentSpec{
+			Name:           m.AzureMachinePool.Spec.RoleAssignmentName,
+			MachineName:    m.Name(),
+			ResourceGroup:  azure.VirtualMachineScaleSet,
+			SubscriptionID: m.SubscriptionID(),
 		}
+		return roles
 	}
-	return []azure.RoleAssignmentSpec{}
+	return []azure.ResourceSpecGetter{}
 }
 
 // VMSSExtensionSpecs returns the vmss extension specs.
