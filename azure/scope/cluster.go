@@ -21,9 +21,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2018-06-01/subscriptions"
+	"github.com/jongio/azidext/go/azidext"
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
@@ -78,13 +82,44 @@ func NewClusterScope(ctx context.Context, params ClusterScopeParams) (*ClusterSc
 			return nil, errors.Wrap(err, "failed to configure azure settings and credentials from environment")
 		}
 	} else {
-		credentialsProvider, err := NewAzureClusterCredentialsProvider(ctx, params.Client, params.AzureCluster)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to init credentials provider")
-		}
-		err = params.AzureClients.setCredentialsWithProvider(ctx, params.AzureCluster.Spec.SubscriptionID, params.AzureCluster.Spec.AzureEnvironment, credentialsProvider)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to configure azure settings and credentials for Identity")
+
+		// ToDo: Experiment with workloadidentity
+		// Azure AD Workload Identity webhook will inject the following env vars
+		// 	AZURE_CLIENT_ID with the clientID set in the service account annotation
+		// 	AZURE_TENANT_ID with the tenantID set in the service account annotation. If not defined, then
+		// 	the tenantID provided via azure-wi-webhook-config for the webhook will be used.
+		// 	AZURE_FEDERATED_TOKEN_FILE is the service account token path
+		// 	AZURE_AUTHORITY_HOST is the AAD authority hostname
+
+		awiEnabled := os.Getenv("AWI_ENABLED")
+		awiEnabled = "true"
+		if awiEnabled == "true" {
+			clientID := os.Getenv("AZURE_CLIENT_ID")
+			tenantID := os.Getenv("AZURE_TENANT_ID")
+			tokenFilePath := os.Getenv("AZURE_FEDERATED_TOKEN_FILE")
+			fmt.Println("[DEBUG]: federated token path:", tokenFilePath)
+			// authorityHost := os.Getenv("AZURE_AUTHORITY_HOST")
+			wiCredOptions := &workloadIdentityCredentialOptions{}
+			cred, err := newWorkloadIdentityCredential(tenantID, clientID, tokenFilePath, wiCredOptions)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to setup workload identity")
+			}
+
+			client := subscriptions.NewClient()
+
+			params.AzureClients.setCredentialsForWorkloadIdentity(ctx, params.AzureCluster.Spec.SubscriptionID, params.AzureCluster.Spec.AzureEnvironment)
+			client.Authorizer = azidext.NewTokenCredentialAdapter(cred, []string{"https://management.azure.com//.default"})
+			params.AzureClients.Authorizer = client.Authorizer
+
+		} else {
+			credentialsProvider, err := NewAzureClusterCredentialsProvider(ctx, params.Client, params.AzureCluster)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to init credentials provider")
+			}
+			err = params.AzureClients.setCredentialsWithProvider(ctx, params.AzureCluster.Spec.SubscriptionID, params.AzureCluster.Spec.AzureEnvironment, credentialsProvider)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to configure azure settings and credentials for Identity")
+			}
 		}
 	}
 

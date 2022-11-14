@@ -99,6 +99,37 @@ func (c *AzureClients) setCredentials(subscriptionID, environmentName string) er
 	return err
 }
 
+func (c *AzureClients) setCredentialsForWorkloadIdentity(ctx context.Context, subscriptionID, environmentName string) error {
+
+	settings, err := c.getSettingsFromEnvironment(environmentName)
+	if err != nil {
+		return err
+	}
+
+	if subscriptionID == "" {
+		subscriptionID = settings.GetSubscriptionID()
+		if subscriptionID == "" {
+			return fmt.Errorf("error creating azure services. subscriptionID is not set in cluster or AZURE_SUBSCRIPTION_ID env var")
+		}
+	}
+
+	c.EnvironmentSettings = settings
+	c.ResourceManagerEndpoint = settings.Environment.ResourceManagerEndpoint
+	c.ResourceManagerVMDNSSuffix = settings.Environment.ResourceManagerVMDNSSuffix
+	c.Values[auth.SubscriptionID] = strings.TrimSuffix(subscriptionID, "\n")
+	//c.Values[auth.TenantID] = strings.TrimSuffix(credentialsProvider.GetTenantID(), "\n")
+	//c.Values[auth.ClientID] = strings.TrimSuffix(credentialsProvider.GetClientID(), "\n")
+
+	//clientSecret, err := credentialsProvider.GetClientSecret(ctx)
+	//if err != nil {
+	//	return err
+	//}
+	//c.Values[auth.ClientSecret] = strings.TrimSuffix(clientSecret, "\n")
+
+	//c.Authorizer, err = credentialsProvider.GetAuthorizer(ctx, c.ResourceManagerEndpoint, c.Environment.ActiveDirectoryEndpoint)
+	return err
+}
+
 func (c *AzureClients) setCredentialsWithProvider(ctx context.Context, subscriptionID, environmentName string, credentialsProvider CredentialsProvider) error {
 	if credentialsProvider == nil {
 		return fmt.Errorf("credentials provider cannot have an empty value")
@@ -138,16 +169,16 @@ func (c *AzureClients) getSettingsFromEnvironment(environmentName string) (s aut
 		Values: map[string]string{},
 	}
 	s.Values[auth.EnvironmentName] = environmentName
-	setValue(s, auth.SubscriptionID)
-	setValue(s, auth.TenantID)
-	setValue(s, auth.AuxiliaryTenantIDs)
-	setValue(s, auth.ClientID)
-	setValue(s, auth.ClientSecret)
-	setValue(s, auth.CertificatePath)
-	setValue(s, auth.CertificatePassword)
-	setValue(s, auth.Username)
-	setValue(s, auth.Password)
-	setValue(s, auth.Resource)
+	//setValue(s, auth.SubscriptionID)
+	//setValue(s, auth.TenantID)
+	//setValue(s, auth.AuxiliaryTenantIDs)
+	//setValue(s, auth.ClientID)
+	//setValue(s, auth.ClientSecret)
+	//setValue(s, auth.CertificatePath)
+	//setValue(s, auth.CertificatePassword)
+	//setValue(s, auth.Username)
+	//setValue(s, auth.Password)
+	//setValue(s, auth.Resource)
 	if v := s.Values[auth.EnvironmentName]; v == "" {
 		s.Environment = azure.PublicCloud
 	} else {

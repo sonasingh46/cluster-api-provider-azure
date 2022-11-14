@@ -49,6 +49,9 @@ type CredentialsProvider interface {
 	GetTenantID() string
 }
 
+type AWICredentialsProvider struct {
+}
+
 // AzureCredentialsProvider represents a credential provider with azure cluster identity.
 type AzureCredentialsProvider struct {
 	Client   client.Client
