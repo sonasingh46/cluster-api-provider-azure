@@ -113,7 +113,7 @@ The first step for creating a Kubernetes cluster using capz is creating a bootst
 
 **Management Cluster**
 
-- Once a K8s cluster is created from the bootstrap cluster, to convert it into a management cluster `clusterctl init` and `clusterctl move` commands are executed.
+- Once a K8s cluster is created from the bootstrap cluster, to convert it into a management cluster `clusterctl init` and `clusterctl move` commands are executed. More on this [here](#https://cluster-api.sigs.k8s.io/clusterctl/commands/move.html?highlight=pivot#bootstrap--pivot)
 
 - After `clusterctl init` command is executed, the control plane node should have the key pairs and then patched to include them in the container path by setting the kube-apiserver and kube-controller-manager flags.
 
@@ -123,7 +123,7 @@ The first step for creating a Kubernetes cluster using capz is creating a bootst
 
 - AAD pod identity can co exist with AZWI
 - Migration plan from AAD pod identity to AZWI for existing cluster. Refer to the `Migration Plan` section at the bottom of the document.
-- For AZWI to work the following prerequisites must be met.
+- For AZWI to work the following prerequisites must be met for self managed cluster. This is not required for managed cluster and follow this [link](#https://azure.github.io/azure-workload-identity/docs/installation/managed-clusters.html) to know more about managed cluster setup.
   - Key Generation
   - OIDC URL Setup
   - Set Service Account Signing Flags
@@ -177,7 +177,7 @@ nodes:
 
 #### <a name='FederatedCredential'></a>Federated Credential
 
-The service account that the capz pod will use should be annotated with the client ID of the AAD application or User Assigned Identity and a federated identity should be created by associating the Service Accont as a subject.
+The service account that the capz pod will use should be annotated with the client ID of the AAD application or User Assigned Identity and a federated identity should be created by associating the Service Account as a subject.
 
 ```yaml
 apiVersion: v1
@@ -202,24 +202,17 @@ az identity federated-credential create \
   --subject "system:serviceaccount:${SERVICE_ACCOUNT_NAMESPACE}:${SERVICE_ACCOUNT_NAME}"
 ```
 
-This means there are two approaches to associate the correct service account to the capz deployment.
-
-- Deploy the capz with the usual configuration YAML and then patch the service account with the client ID.
-
-- Or create the service account prior to capz deployment which uses the same service account.
-
-
 #### <a name='DistributeKeys'></a>Distribute Keys To Management Cluster
 
 Setting up credentials for management cluster which is created from the bootstrap cluster is key activity. This requires storing the keys on control plane node. One approach to do so can be the following:
 
-- A reular `clusterctl init` is done.
-- Once the cluster is up and running, the keys can be distributed on the control plane node via scp.
-- After distributing the key, the appropriate flags as it was set up for the bootstrap cluster can be setup.
-- The service account should be annotated with the client ID.
-- At this stage, `clusterctl move` can be executed.
+- A `clusterctl init` is done.
 
-Above activities can be automated via clusterctl subcommands that is specific to azure infrastructre.
+- Once the cluster is up and running, the keys can be distributed on the control plane node via scp.
+
+- After distributing the key, the appropriate flags as it was set up for the bootstrap cluster can be setup.
+
+- At this stage, `clusterctl move` can be executed.
 
 ### <a name='ProposedConfigurationChanges'></a>Proposed Deployment Configuration Changes
 
@@ -325,12 +318,8 @@ func (w *workloadIdentityCredential) getAssertion(context.Context) (string, erro
 
 #### <a name='Howtomultitenancy'></a>1. How to achieve multi-tenancy?
 
-The identity is tied to service account via the client ID annotation present in the service account. Service account has one to one mapping with the pod. To have a many-to-one relationship between multiple identities and a service account, multiple federated identity credentials can be created that references the same service account.
-
-`azure.workload.identity/client-id` annotations contains the client ID of the identity that will be used.
-
-To use a different client ID, the client ID should be updated but the limitation is that at a time only one identity can be used. 
-
+The identity is tied to the client ID which can be supplied via AzureClusterIdentity. In case identity is not found in AzureClusterIdentity client ID from the service account annotation
+`azure.workload.identity/client-id` will be used.
 
 #### <a name='Howtodistributekeys'></a>2. How to distribute key pair to management cluster?
 
@@ -344,9 +333,6 @@ Though AZWI has a lot of advantages as compared to AZWI, setting up AZWI involve
 ### <a name='MigrationPlan'></a>Migration Plan
 
 Management clusters using AAD pod identity should have a seamless migration process which is well documented.
-
-As part of upgrade that supports AZWI, the env variable can be set to true to use AZWI. 
-But if capz uses AZWI, it can use only one identity at a time and it can pose challenges to migration if the management cluster is using different identity simultaneously from the AAD pod identity. 
 
 ### <a name='TestPlan'></a>Test Plan
 
