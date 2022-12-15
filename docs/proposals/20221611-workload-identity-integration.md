@@ -31,6 +31,7 @@ see-also:
 		* [Set Service Account Signing Flags](#SetServiceAccountSigningFlags)
 		* [Federated Credential](#FederatedCredential)
 		* [Distribute Keys To Management Cluster](#DistributeKeys)
+	* [Proposed API Changes](#ProposedApiChanges)
 	* [Proposed Deployment Configuration Changes](#ProposedConfigurationChanges)
 	* [Proposed Controller Changes](#ProposedControllerChanges)
 		* [Identity](#Identity)
@@ -83,7 +84,7 @@ To learn more about AZWI please visit this link https://azure.github.io/azure-wo
 
 ## <a name='Proposal'></a>Proposal
 
-In this model, Kubernetes cluster itself becomes the token issuer issuing tokens to Kubernetes service accounts. These service accounts can be configured to be trusted on Azure AD application or user assigned managed identity. Workloads/pods can use this service account token which is projected to it's volume and can exchange the projected service account token for an Azure AD token.
+In AZWI model, Kubernetes cluster itself becomes the token issuer issuing tokens to Kubernetes service accounts. These service accounts can be configured to be trusted on Azure AD application or user assigned managed identity. Workloads/pods can use this service account token which is projected to it's volume and can exchange the projected service account token for an Azure AD token.
 
 The first step for creating a Kubernetes cluster using capz is creating a bootstrap cluster and then deploying capi, capz and other helper components. On a high level the workflow looks the following to be able to use AZWI and create a management cluster.
 
@@ -91,7 +92,7 @@ The first step for creating a Kubernetes cluster using capz is creating a bootst
 
 - The operator/admin generates signing key pair or BYO key pair. 
 
-- The bootstrap cluster is configured with appropriate flags on kube-apiserver and kube-controller-manager and the key pairs are mounted on the container path for control plane node. [ToDo: Details on the values of the flag]
+- The bootstrap cluster is configured with appropriate flags on kube-apiserver and kube-controller-manager and the key pairs are mounted on the container path for control plane node. See [this](#SetServiceAccountSigningFlags) section for more details on this.
 	- kube-apiserver flags
 		- --service-account-issuer
 		- --service-account-signing-key-file
@@ -113,9 +114,9 @@ The first step for creating a Kubernetes cluster using capz is creating a bootst
 
 **Management Cluster**
 
-- Once a K8s cluster is created from the bootstrap cluster, to convert it into a management cluster `clusterctl init` and `clusterctl move` commands are executed. More on this [here](#https://cluster-api.sigs.k8s.io/clusterctl/commands/move.html?highlight=pivot#bootstrap--pivot)
+- Once a K8s cluster is created from the bootstrap cluster, to convert it into a management cluster `clusterctl init` and `clusterctl move` commands are executed. More on this [here](https://cluster-api.sigs.k8s.io/clusterctl/commands/move.html?highlight=pivot#bootstrap--pivot)
 
-- After `clusterctl init` command is executed, the control plane node should have the key pairs and then patched to include them in the container path by setting the kube-apiserver and kube-controller-manager flags.
+- After that, the control plane node should have the key pairs and then patched to include them in the container path by setting the kube-apiserver and kube-controller-manager flags.
 
 - The capz pod should know what client ID to use. It can again be supplied via AzureClusterIdentity.
 
@@ -204,22 +205,53 @@ az identity federated-credential create \
 
 #### <a name='DistributeKeys'></a>Distribute Keys To Management Cluster
 
-Setting up credentials for management cluster which is created from the bootstrap cluster is key activity. This requires storing the keys on control plane node. One approach to do so can be the following:
+Setting up credentials for management cluster which is created from the bootstrap cluster is a key activity. This requires storing the keys on control plane node and patching kube-apiserver and kube-controller-manager flags to include the service account signing flags similar to what is discussed in the above `Set Service Account Signing Flags` section.
 
-- A `clusterctl init` is done.
+### <a name='ProposedApiChanges'></a>Proposed API Changes
 
-- Once the cluster is up and running, the keys can be distributed on the control plane node via scp.
+The AzureClusterIdentity spec has a `Type` field that can be used to define what type of Azure identity should be used.
 
-- After distributing the key, the appropriate flags as it was set up for the bootstrap cluster can be setup.
+```go
+// AzureClusterIdentitySpec defines the parameters that are used to create an AzureIdentity.
+type AzureClusterIdentitySpec struct {
+	// Type is the type of Azure Identity used.
+	// ServicePrincipal, ServicePrincipalCertificate, UserAssignedMSI or ManualServicePrincipal.
+	Type IdentityType `json:"type"`
 
-- At this stage, `clusterctl move` can be executed.
+	// ...
+	// ...
+}
+```
+
+Introducing one more acceptable value for `Type` in AzureClusterIdentity spec for workload identity is proposed.
+
+```go
+// IdentityType represents different types of identities.
+// +kubebuilder:validation:Enum=ServicePrincipal;UserAssignedMSI;ManualServicePrincipal;ServicePrincipalCertificate;WorkloadIdentity
+type IdentityType string
+
+const (
+	// UserAssignedMSI represents a user-assigned managed identity.
+	UserAssignedMSI IdentityType = "UserAssignedMSI"
+
+	// ServicePrincipal represents a service principal using a client password as secret.
+	ServicePrincipal IdentityType = "ServicePrincipal"
+
+	// ManualServicePrincipal represents a manual service principal.
+	ManualServicePrincipal IdentityType = "ManualServicePrincipal"
+
+	// ServicePrincipalCertificate represents a service principal using a certificate as secret.
+	ServicePrincipalCertificate IdentityType = "ServicePrincipalCertificate"
+	
+	//[Proposed Change] WorkloadIdentity represents  azure workload identity.
+	WorkloadIdentity IdentityType = "WorkloadIdentity"
+)
+
+```
 
 ### <a name='ProposedConfigurationChanges'></a>Proposed Deployment Configuration Changes
 
 - Azure Workload Identity mutating webhook should be deployed as part of capz deployment.
-
-- The capz deployment configuration should have a environment variable configuration that is used to enable/disable the use of AZWI. By default it will be disabled.
-
 
 ### <a name='ProposedControllerChanges'></a>Proposed Controller Changes
 
@@ -228,10 +260,11 @@ The identity code workflow in capz should use `azidentity` module to exchange to
 
 #### <a name='Identity'></a>Identity
 
-Following is a sample code that should be made into capz identity workflow. 
+Azure client and tenant ID are injected as env variables by the azwi webhook. But for the azwi workflow, client ID and tenant ID will be fetched from AzureClusterIdentity first and will use the env variables as a fallback option. 
+
+Following is a sample code that should be made into capz identity workflow.
 
 ```go
-		if AZWIEnabled == "true" {
 			// Azure AD Workload Identity webhook will inject the 
 			// following env vars
 
@@ -264,7 +297,6 @@ Following is a sample code that should be made into capz identity workflow.
 			client.Authorizer = azidext.NewTokenCredentialAdapter(cred, []string{"https://management.azure.com//.default"})
 			params.AzureClients.Authorizer = client.Authorizer
 
-		}
 ```
 
 **NOTE:**
@@ -313,7 +345,6 @@ func (w *workloadIdentityCredential) getAssertion(context.Context) (string, erro
 
 ```
 
-
 ### <a name='OpenQuestions'></a>Open Questions
 
 #### <a name='Howtomultitenancy'></a>1. How to achieve multi-tenancy?
@@ -324,7 +355,6 @@ The identity is tied to the client ID which can be supplied via AzureClusterIden
 #### <a name='Howtodistributekeys'></a>2. How to distribute key pair to management cluster?
 
 This an open question to discuss to find a better way to distribute keys to the control plane node for the management cluster.
-
 
 #### <a name='UserExperience'></a>3. User Experience
 
@@ -340,4 +370,5 @@ Management clusters using AAD pod identity should have a seamless migration proc
 * Using AZWI for existing e2e tests for create, upgrade, scale down/up, and delete.
 
 ## <a name='ImplementationHistory'></a>Implementation History
-TBD
+
+https://github.com/kubernetes-sigs/cluster-api-provider-azure/pull/2924
