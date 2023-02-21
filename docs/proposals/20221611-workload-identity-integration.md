@@ -4,7 +4,9 @@ authors:
     - @sonasingh46
 reviewers:
     - @aramase
-    - @CecileRobertMichon
+	- @CecileRobertMichon
+	- @yastij
+	- @fabriziopandini 
 
 creation-date: 2022-11-16
 last-updated: N/A
@@ -86,7 +88,9 @@ To learn more about AZWI please visit this link https://azure.github.io/azure-wo
 ### <a name='NonGoals'></a>Non Goals
 
 - Automation for migration from AAD pod identity to workload identity.
-- More flexible way so key distribution so that key pair other than the one present for the exiting cluster via `<cluster-name>-sa` secret can be used. To understand more on this please refer [MigrationPlan](#migration-plan) 
+- More flexible way so key distribution so that key pair other than the one present for the exiting cluster via `<cluster-name>-sa` secret can be used. To understand more on this please refer [MigrationPlan](#migration-plan)
+- Install workload identity on workload clusters created by CAPZ.
+- Use workload identity for cloud provider azure once supported. 
 
 ## <a name='Proposal'></a>Proposal
 
