@@ -4,9 +4,9 @@ authors:
     - @sonasingh46
 reviewers:
     - @aramase
-	- @CecileRobertMichon
-	- @yastij
-	- @fabriziopandini 
+    - @CecileRobertMichon
+    - @yastij
+    - @fabriziopandini 
 
 creation-date: 2022-11-16
 last-updated: N/A
@@ -88,7 +88,7 @@ To learn more about AZWI please visit this link https://azure.github.io/azure-wo
 ### <a name='NonGoals'></a>Non Goals
 
 - Automation for migration from AAD pod identity to workload identity.
-- More flexible way so key distribution so that key pair other than the one present for the exiting cluster via `<cluster-name>-sa` secret can be used. To understand more on this please refer [MigrationPlan](#migration-plan)
+- More flexible way of key distribution so that key pair other than the one present for the exiting cluster via `<cluster-name>-sa` secret can be used. To understand more on this please refer [MigrationPlan](#migration-plan)
 - Install workload identity on workload clusters created by CAPZ.
 - Use workload identity for cloud provider azure once supported. 
 
@@ -102,7 +102,7 @@ The first step for creating a Kubernetes cluster using capz is creating a bootst
 
 - The operator/admin generates signing key pair or BYO key pair. 
 
-- The bootstrap cluster is configured with appropriate flags on kube-apiserver and kube-controller-manager and the key pairs are mounted on the container path for control plane node. See [this](#SetServiceAccountSigningFlags) section for more details on this.
+- The bootstrap cluster is configured with appropriate flags on kube-apiserver and kube-controller-manager and the key pairs are mounted on the container path for control plane node. See [this](#set-service-account-signing-flags) section for more details on this.
 	- kube-apiserver flags
 		- --service-account-issuer
 		- --service-account-signing-key-file
@@ -133,8 +133,8 @@ The first step for creating a Kubernetes cluster using capz is creating a bootst
 ### <a name='ImplementationDetailsNotesConstraints'></a>Implementation Details/Notes/Constraints
 
 - AAD pod identity can co exist with AZWI
-- Migration plan from AAD pod identity to AZWI for existing cluster. Refer to the `Migration Plan` section at the bottom of the document.
-- For AZWI to work the following prerequisites must be met for self managed cluster. This is not required for managed cluster and follow this [link](#https://azure.github.io/azure-workload-identity/docs/installation/managed-clusters.html) to know more about managed cluster setup.
+- Migration plan from AAD pod identity to AZWI for existing cluster. Refer to the [MigrationPlan](#migration-plan) section at the bottom of the document.
+- For AZWI to work the following prerequisites must be met for self managed cluster. This is not required for managed cluster and follow this [link](https://azure.github.io/azure-workload-identity/docs/installation/managed-clusters.html) to know more about managed cluster setup.
   - Key Generation
   - OIDC URL Setup
   - Set Service Account Signing Flags
@@ -146,9 +146,9 @@ These keys will be mounted on a path on the containers running on the control pl
 
 #### <a name='OidcUrlSetup'></a>OIDC URL Setup
 
-Two documents i.e OIDC and JWKS json documents needs to be generated and published to a public URL. The OIDC document contains the metadata of the issuer. The JSON Web Key Sets (JWKS) document contains the public signing key(s) that allows AAD to verify the authenticity of the service account token.
+Two documents i.e OIDC and JWKS json documents needs to be generated and published to a public URL. The OIDC discovery document contains the metadata of the issuer. The JSON Web Key Sets (JWKS) document contains the public signing key(s) that allows AAD to verify the authenticity of the service account token.
 
-For more details on how to set up OIDC URL and more details on it, please g through this this [link](https://azure.github.io/azure-workload-identity/docs/installation/self-managed-clusters/oidc-issuer.html)
+Refer to [link](https://azure.github.io/azure-workload-identity/docs/installation/self-managed-clusters/oidc-issuer.html)for steps to setup and OIDC issuer URL.
 
 The steps on a high level to setup is the following
 - Create an azure blob storage account.
@@ -204,6 +204,8 @@ metadata:
 
 Also, a federated identity should be created using the azure cli ( or via the azure portal).
 
+With the upcoming release of workload identity admission webhook, the label in service account is no longer required starting from v0.15.0. The label is now required on the pod instead of the service account.
+
 ```bash
 az identity federated-credential create \
   --name "kubernetes-federated-credential" \
@@ -215,7 +217,7 @@ az identity federated-credential create \
 
 #### <a name='DistributeKeys'></a>Distribute Keys To Management Cluster
 
-Setting up credentials for management cluster which is created from the bootstrap cluster is a key activity. This requires storing the keys on control plane node and patching kube-apiserver and kube-controller-manager flags to include the service account signing flags similar to what is discussed in the above `Set Service Account Signing Flags` section.
+Setting up credentials for management cluster which is created from the bootstrap cluster is a key activity. This requires storing the keys on control plane node and patching kube-apiserver and kube-controller-manager flags to include the service account signing flags similar to what is discussed in the above [Set Service Account Signing Flags](#set-service-account-signing-fl) section.
 
 Key pair can be distributed to a workload cluster by creating a secret with the name as `<cluster-name>-sa` encompassing the key pair. 
 Follow this [link](https://cluster-api.sigs.k8s.io/tasks/certs/using-custom-certificates.html) for more details.
@@ -372,7 +374,7 @@ Keys can be distributed by using the CABPK feature by creating a secret with nam
 
 #### <a name='UserExperience'></a>3. User Experience
 
-Though AZWI has a lot of advantages as compared to AZWI, setting up AZWI involves couple of manual step and it can impact the user experience.
+Though AZWI has a lot of advantages as compared to AAD pod identity, setting up AZWI involves couple of manual step and it can impact the user experience.
 
 ### <a name='Limitations'></a>Limitations
 
