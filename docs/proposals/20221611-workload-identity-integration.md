@@ -1,4 +1,3 @@
----
 title: Workload Identity Integration
 authors:
     - @sonasingh46
