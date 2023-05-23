@@ -1,4 +1,4 @@
----
+```yaml
 title: Workload Identity Integration
 authors:
     - @sonasingh46
@@ -13,7 +13,9 @@ last-updated: N/A
 status: implementable
 see-also:
     - https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues/2205
----
+```
+## <a name='Prince'></a>Prince
+asdasdada
 
 # Workload Identity Integration
 
@@ -21,6 +23,7 @@ see-also:
 
 <!-- vscode-markdown-toc -->
 * [Table of Contents](#TableofContents)
+* [Mgmt](#Mgmt)
 * [Acronyms](#Acronyms)
 * [Summary](#Summary)
 * [Motivation](#Motivation)
@@ -104,7 +107,7 @@ The following personas are available when writing user stories.
 
 ## <a name='UserStories'></a>User Stories
 
-- [S1] As a cloud admin I want to use workload identiy in the management cluster in order to enhance security by not using the static azure credentials. I prefer to use CAPI pivoting to create management cluster which means creating a management cluster on Kind and then create a workload cluster on Azure from that and then convert the workload cluster to a management cluster.
+- [S1] As a [cloud admin](#Mgmt) I want to use workload identiy in the management cluster in order to enhance security by not using the static azure credentials. I prefer to use CAPI pivoting to create management cluster which means creating a management cluster on Kind and then create a workload cluster on Azure from that and then convert the workload cluster to a management cluster.
 
 - [S2] I am a cloud admin and I want to install CAP* on an existing Kubernetes cluster and make this a management cluster to create and manage workload clusters by using workload identity. For example, creating a management cluster on an already existing Kubernetes cluster on Azure.
 
@@ -116,7 +119,7 @@ In AZWI model, Kubernetes cluster itself becomes the token issuer issuing tokens
 
 The first step for creating a Kubernetes cluster using capz is creating a management cluster. On a high level the workflow looks the following to be able to use AZWI in the management cluster.
 
-**Management Cluster on Kind**
+**<a name='Mgmt'></a>Management Cluster on Kind**
 
 Notes: 
 - Often, management cluster created on Kind is also termed as Bootstrap cluster.
