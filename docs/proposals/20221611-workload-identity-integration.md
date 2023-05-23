@@ -25,7 +25,9 @@ see-also:
 * [Summary](#Summary)
 * [Motivation](#Motivation)
 	* [Goals](#Goals)
-	* [Non Goals](#NonGoals)
+	* [Future Goals](#FutureGoals)
+* [Personas](#Personas)
+* [User Stories](#UserStories)
 * [Proposal](#Proposal)
 	* [Implementation Details/Notes/Constraints](#ImplementationDetailsNotesConstraints)
 		* [Key Generation](#KeyGeneration)
@@ -33,6 +35,7 @@ see-also:
 		* [Set Service Account Signing Flags](#SetServiceAccountSigningFlags)
 		* [Federated Credential](#FederatedCredential)
 		* [Distribute Keys To Management Cluster](#DistributeKeys)
+	* [Cloud Provider Azure Integration](#CloudProviderAzureIntegration)
 	* [Proposed API Changes](#ProposedApiChanges)
 	* [Proposed Deployment Configuration Changes](#ProposedConfigurationChanges)
 	* [Proposed Controller Changes](#ProposedControllerChanges)
@@ -41,7 +44,6 @@ see-also:
 		* [1. How to achieve multi-tenancy?](#Howtomultitenancy)
 		* [2. How to distribute key pair to management cluster?](#Howtodistributekeys)
 		* [3. User Experience](#UserExperience)
-	* [Limitations](#Limitations)
 	* [Migration Plan](#MigrationPlan)
 	* [Test Plan](#TestPlan)
 * [Implementation History](#ImplementationHistory)
@@ -87,22 +89,45 @@ To learn more about AZWI please visit this link https://azure.github.io/azure-wo
 
 ### <a name='NonGoals'></a>Non Goals
 
+- Use workload identity for cloud provider azure once supported.
+
+- Migrate to using workload identity in CI pipelines.
+
 - Automation for migration from AAD pod identity to workload identity.
-- More flexible way of key distribution so that key pair other than the one present for the exiting cluster via `<cluster-name>-sa` secret can be used. To understand more on this please refer [MigrationPlan](#migration-plan)
-- Install workload identity on workload clusters created by CAPZ.
-- Use workload identity for cloud provider azure once supported. 
+
+## <a name='Personas'></a>Personas
+
+The following personas are available when writing user stories. 
+
+- John - Cloud Admin
+	- Installs, configures and maintains, management and workload clusters on Azure using CAPZ. 
+
+## <a name='UserStories'></a>User Stories
+
+- [S1] As a cloud admin I want to use workload identiy in the management cluster in order to enhance security by not using the static azure credentials. I prefer to use CAPI pivoting to create management cluster which means creating a management cluster on Kind and then create a workload cluster on Azure from that and then convert the workload cluster to a management cluster.
+
+- [S2] I am a cloud admin and I want to install CAP* on an existing Kubernetes cluster and make this a management cluster to create and manage workload clusters by using workload identity. For example, creating a management cluster on an already existing Kubernetes cluster on Azure.
+
+- [S3] As a cloud admin I want to migrate to using workload identity for my management cluster which is still using older AAD pod identity.   
 
 ## <a name='Proposal'></a>Proposal
 
 In AZWI model, Kubernetes cluster itself becomes the token issuer issuing tokens to Kubernetes service accounts. These service accounts can be configured to be trusted on Azure AD application or user assigned managed identity. Workloads/pods can use this service account token which is projected to it's volume and can exchange the projected service account token for an Azure AD token.
 
-The first step for creating a Kubernetes cluster using capz is creating a bootstrap cluster and then deploying capi, capz and other helper components. On a high level the workflow looks the following to be able to use AZWI and create a management cluster.
+The first step for creating a Kubernetes cluster using capz is creating a management cluster. On a high level the workflow looks the following to be able to use AZWI in the management cluster.
 
-**Bootstrap Cluster**
+**Management Cluster on Kind**
+
+Notes: 
+- Often, management cluster created on Kind is also termed as Bootstrap cluster.
+- Cloud Provider azure deployment is not required in this case.
+- This is also used in CAPI pivoting i.e creating a management cluster on Kind and then later creating a workload cluster from it and again this workload cluster is then converted to a management cluster and the Kind cluster is decomissioned. Refer to user story S1(#UserStories). 
+
+User Workflow:
 
 - The operator/admin generates signing key pair or BYO key pair. 
 
-- The bootstrap cluster is configured with appropriate flags on kube-apiserver and kube-controller-manager and the key pairs are mounted on the container path for control plane node. See [this](#set-service-account-signing-flags) section for more details on this.
+- A Kind cluster is created with appropriate flags on kube-apiserver and kube-controller-manager and the key pairs are mounted on the container path for control plane node. See [this](#set-service-account-signing-flags) section for more details on this.
 	- kube-apiserver flags
 		- --service-account-issuer
 		- --service-account-signing-key-file
@@ -113,27 +138,35 @@ The first step for creating a Kubernetes cluster using capz is creating a bootst
 - The operator/admin uploads the following two documents in a blob storage container. These documents is accessible publicy on a URL and this URL is commonly referred as issuer URL in this context. More about this [here](https://azure.github.io/azure-workload-identity/docs/installation/self-managed-clusters/oidc-issuer.html)  
   - Generate and upload the Discovery Document.
   - Generate and upload the JWKS Document.
- 
-- The operator/admin installs the AZWI mutating admission webhook on the bootstrap cluster.
-
-- CAPZ pod can use the client ID of the Azure AD or User Assigned Identity by passing it in AzureClusterIdentity CR. Also, the capz manager service account can be optionally annotated with the Azure AD or User Assigned Client ID for fallback. 
 
 - A federated credential should be created between the identity and the OIDC issuer URL and the service account(subject). More on this [here](https://azure.github.io/azure-workload-identity/docs/topics/federated-identity-credential.html)
 
-- CAPZ pod should use the `azidentity` module from the azure-sdk-for-go to exchange AD token in lieu of the projected service account token.
+- CAPI and CAPZ are deployed on the Kind cluster that supports workload identity.
 
-**Management Cluster**
+- CAPZ pod uses the client ID and tenant ID of the Azure AD or User Assigned Identity by passing it in AzureClusterIdentity CR. The AzureClusterIdentity also has a capabiltiy to specifiy type of identity as `WorkloadIdentity` on the field `type`. 
 
-- Once a K8s cluster is created from the bootstrap cluster, to convert it into a management cluster `clusterctl init` and `clusterctl move` commands are executed. More on this [here](https://cluster-api.sigs.k8s.io/clusterctl/commands/move.html?highlight=pivot#bootstrap--pivot)
+- The management cluster is now configured to use workload identity. A workload cluster can now be created by referencing the AzureClusterIdentity.
 
-- After that, the control plane node should have the key pairs and then patched to include them in the container path by setting the kube-apiserver and kube-controller-manager flags.
 
-- The capz pod should know what client ID to use. It can again be supplied via AzureClusterIdentity.
+**Management Cluster on Azure Via Pivoting**
+
+Notes:
+- Cloud provider azure will be required to run on Kubernetes cluster in this case as the management cluster is created on Azure cloud.
+
+User Workflow:
+
+- All the steps are followed as described above in `Management Cluster on Kind` with a exception that a secret is created with name `<cluster-name>-sa` encompassing the key pairs that is generated in the previous step. This is done so that the key pairs gets distributed on the control plane node. More details on it [here](https://cluster-api.sigs.k8s.io/tasks/certs/using-custom-certificates.html)
+
+- A workload cluster is created using azure static credentials or aad pod identity. 
+
+- After the workload cluster is created, to convert it into a management cluster `clusterctl init` and `clusterctl move` commands are executed. More on this [here](https://cluster-api.sigs.k8s.io/clusterctl/commands/move.html?highlight=pivot#bootstrap--pivot)
+
+- The workload cluster is now converted into a management cluster but still using static credentials. A migration step can be followed to migrate to using workload identity.
 
 ### <a name='ImplementationDetailsNotesConstraints'></a>Implementation Details/Notes/Constraints
 
 - AAD pod identity can co exist with AZWI
-- Migration plan from AAD pod identity to AZWI for existing cluster. Refer to the [MigrationPlan](#migration-plan) section at the bottom of the document.
+- Migration plan to AZWI for existing cluster. Refer to the [MigrationPlan](#migration-plan) section at the bottom of the document.
 - For AZWI to work the following prerequisites must be met for self managed cluster. This is not required for managed cluster and follow this [link](https://azure.github.io/azure-workload-identity/docs/installation/managed-clusters.html) to know more about managed cluster setup.
   - Key Generation
   - OIDC URL Setup
@@ -148,7 +181,7 @@ These keys will be mounted on a path on the containers running on the control pl
 
 Two documents i.e OIDC and JWKS json documents needs to be generated and published to a public URL. The OIDC discovery document contains the metadata of the issuer. The JSON Web Key Sets (JWKS) document contains the public signing key(s) that allows AAD to verify the authenticity of the service account token.
 
-Refer to [link](https://azure.github.io/azure-workload-identity/docs/installation/self-managed-clusters/oidc-issuer.html)for steps to setup and OIDC issuer URL.
+Refer to [link](https://azure.github.io/azure-workload-identity/docs/installation/self-managed-clusters/oidc-issuer.html) for steps to setup and OIDC issuer URL.
 
 The steps on a high level to setup is the following
 - Create an azure blob storage account.
@@ -215,12 +248,21 @@ az identity federated-credential create \
   --subject "system:serviceaccount:${SERVICE_ACCOUNT_NAMESPACE}:${SERVICE_ACCOUNT_NAME}"
 ```
 
-#### <a name='DistributeKeys'></a>Distribute Keys To Management Cluster
-
-Setting up credentials for management cluster which is created from the bootstrap cluster is a key activity. This requires storing the keys on control plane node and patching kube-apiserver and kube-controller-manager flags to include the service account signing flags similar to what is discussed in the above [Set Service Account Signing Flags](#set-service-account-signing-fl) section.
+#### <a name='DistributeKeys'></a>Distribute Keys
 
 Key pair can be distributed to a workload cluster by creating a secret with the name as `<cluster-name>-sa` encompassing the key pair. 
 Follow this [link](https://cluster-api.sigs.k8s.io/tasks/certs/using-custom-certificates.html) for more details.
+
+### <a name='CloudProviderAzureIntegration'></a>Cloud Provider Azure Integration
+
+- Cloud provider azure should be deployed with projected service account token config in the config YAML.
+
+- CAPZ should create cloud config by setting the following values if workload identity is used. 
+```go
+	AADFederatedTokenFile string `json:"aadFederatedTokenFile,omitempty" yaml:"aadFederatedTokenFile,omitempty"`
+	UseFederatedWorkloadIdentityExtension bool `json:"useFederatedWorkloadIdentityExtension,omitempty" yaml:"useFederatedWorkloadIdentityExtension,omitempty"`
+```
+
 
 ### <a name='ProposedApiChanges'></a>Proposed API Changes
 
@@ -267,7 +309,24 @@ const (
 
 ### <a name='ProposedConfigurationChanges'></a>Proposed Deployment Configuration Changes
 
-- Azure Workload Identity mutating webhook should be deployed as part of capz deployment.
+- Service account token projected volume and volume mount config should be added in the CAPZ maanger deployment config as described below: 
+
+```yaml
+          volumeMounts:
+            - mountPath: /var/run/secrets/azure/tokens
+              name: azure-identity-token
+              readOnly: true
+...
+      volumes:
+      - name: azure-identity-token
+        projected:
+          defaultMode: 420
+          sources:
+          - serviceAccountToken:
+              audience: api://AzureADTokenExchange
+              expirationSeconds: 3600
+              path: azure-identity-token
+```
 
 ### <a name='ProposedControllerChanges'></a>Proposed Controller Changes
 
@@ -365,8 +424,7 @@ func (w *workloadIdentityCredential) getAssertion(context.Context) (string, erro
 
 #### <a name='Howtomultitenancy'></a>1. How to achieve multi-tenancy?
 
-The identity is tied to the client ID which can be supplied via AzureClusterIdentity. In case identity is not found in AzureClusterIdentity client ID from the service account annotation
-`azure.workload.identity/client-id` will be used.
+The identity is tied to the client ID which can be supplied via AzureClusterIdentity.
 
 #### <a name='Howtodistributekeys'></a>2. How to distribute key pair to management cluster?
 
@@ -376,39 +434,49 @@ Keys can be distributed by using the CABPK feature by creating a secret with nam
 
 Though AZWI has a lot of advantages as compared to AAD pod identity, setting up AZWI involves couple of manual step and it can impact the user experience.
 
-### <a name='Limitations'></a>Limitations
-
-- Cloud provider azure does not support workload identity yet and it also needs to authenticate to azure APIs. 
-- That means one caveat of using AZWI in capz will be that using `UserAssignedIdentity` will become a requirement so that cloud provider azure is able to authenticate to the Azure APIs until cloud provider azure supports workload identity.
-
 ### <a name='MigrationPlan'></a>Migration Plan
 
 Management clusters using AAD pod identity should have a seamless migration process which is well documented.
 
 For migrating an existing cluster to use AZWI following steps should be taken.
 
-- Generate a key pair or use the same key pairs as created via `<cluster-name>-sa` secret. 
+**Migrating Greenfield Clusters**
+- The steps in this section applies to greenfield cluster creation that using CAPI pivoting to use workload identity. As in this case the key pairs are already distributed to the control plane nodes. 
+
+**Migrating Brownfield Clusters**
+
+- The steps in this section applies to existings clusters. 
+
+- Generate a key pair or use the same key pairs as present in `/etc/kuberentes/pki`
 
 - Perform the following pre-requistes as discussed earlier in the **Bootstrap Cluster** section of the [document](#proposal):
 	- Generate and upload the JWKS and Discovery Document.
 	- Install the AZWI mutating admission webhook controller.
-	- Establish federated credential for the key pair. 	 
-- Create a `UserAssignedIdentity` and update the machine template to use user assigned identity.
+	- Establish federated credential for the key pair.
 
-- Patch the control plane to include the following flags on the api server.
-	- `service-account-issuer: <value-is-service-account-issuer-url>`
+- If you are not using the existing key pairs then perform a service account rotation using this guide. 
+https://azure.github.io/azure-workload-identity/docs/topics/self-managed-clusters/service-account-key-rotation.html
+
+- If you are using the existing key pairs then rotation is not required.
+ 	 
+- Create a `UserAssignedIdentity` and create a new machine template to use user assigned identity.
+
+- This step is not required if you are using the existing key pairs. Patch the control plane to include the following flags on the api server.
 	- `service-account-key-file:<public-key-path-on-controlplane-node>`
 	- `service-account-signing-key-file:<private-key-path-on-controlplane-node>`
 	- **Note:** The key pairs are present in `/etc/kubernetes/pki` directory if using the `<cluster-name>-sa` key pair.
 
-- Patch the control plane to include the following flags on the kube controller manager.
+- This step is not required if you are using the existing key pairs. Patch the control plane to include the following flags on the kube controller manager.
 	- `service-account-signing-key-file:<private-key-path-on-controlplane-node>`
 
-- Perform node rollout to propagate the changes.
+- Patch the control plane to include the following flag on the api server.
+	- `service-account-issuer: <value-is-service-account-issuer-url>`
 
-- Deploy the CAPZ version that supports AZWI. 
+- Perform node rollout to propagate the changes by patching KCP and MachineDeployment objects to include the refrence on the new AzureMachineTemplate created in the previous step.
 
-- Create a new `AzureClusterIdentity` and specify the client ID and `type` to `WorkloadIdentity`.
+- UPgrade to the CAPZ version that supports AZWI. 
+
+- Create a new `AzureClusterIdentity` and specify the client ID, tenant ID and `type` to `WorkloadIdentity`.
 
 - Patch AzureCluster to use the new `AzureClusterIdentity`.
 
@@ -421,4 +489,9 @@ For migrating an existing cluster to use AZWI following steps should be taken.
 
 ## <a name='ImplementationHistory'></a>Implementation History
 
-https://github.com/kubernetes-sigs/cluster-api-provider-azure/pull/2924
+- Enabling workload identity feature in CAPZ
+https://github.com/kubernetes-sigs/cluster-api-provider-azure/pull/3583
+
+- [ToDo]Integrating with cloud provider azure to use workload identity. 
+
+- [ToDo] Moving all the CI jobs to be using workload identity.
