@@ -1,3 +1,4 @@
+```yaml
 title: Workload Identity Integration
 authors:
     - @sonasingh46
@@ -12,7 +13,7 @@ last-updated: N/A
 status: implementable
 see-also:
     - https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues/2205
----
+```
 
 # Workload Identity Integration
 
